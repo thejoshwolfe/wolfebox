@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+
+import sys, os
+import struct
+import socket
+python_version = sys.version_info[0]
+if python_version == 2:
+    bytes_to_str = lambda s: s
+    str_to_bytes = lambda s: s
+elif python_version == 3:
+    bytes_to_str = lambda s: str(s, "utf8")
+    str_to_bytes = lambda s: bytes(s, "utf8")
+
+__version__ = "0.0"
+
+# settings
+default_settings_str = """{
+    "SERVER_NAME": "",
+    "SERVER_PORT": 61086,
+    "CHUNK_SIZE": 0x10000,
+}
+"""
+settings_dir = os.path.join(os.path.expanduser("~"), ".config", "wolfebox")
+if not os.path.isdir(settings_dir):
+    # let any exceptions bubble
+    os.makedirs(settings_dir)
+settings_path = os.path.join(settings_dir, "config.py")
+# try to read settings
+try:
+    # eval chokes on CRLF sometimes, so use 'U'
+    with open(settings_path, "rU") as settings_file:
+        settings = eval(settings_file.read())
+    if type(settings) != dict:
+        raise TypeError()
+except:
+    # swallow all exceptions from mysterious user code and use default settings
+    with open(settings_path, "w") as settings_file:
+        settings_file.write(default_settings_str)
+    settings = eval(default_settings_str)
+if settings.get("SERVER_NAME", "") == "":
+    sys.exit("ERROR: wolfebox server not configured.\nedit " + settings_path)
+
+def open_connection():
+    server_tuple = (settings["SERVER_NAME"], settings["SERVER_PORT"])
+    actual_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        actual_connection.connect(server_tuple)
+    except socket.gaierror:
+        sys.exit("ERROR: Can't connect to the wolfebox server at " + server_tuple)
+    return Connection(actual_connection)
+class Connection:
+    def __init__(self, actual_connection):
+        self.connection = actual_connection
+    def __del__(self):
+        self.connection.close()
+    def read(self, length):
+        chunks = []
+        while length != 0:
+            chunk = self.connection.recv(length)
+            if len(chunk) == 0:
+                break
+            chunks.append(chunk)
+            length -= len(chunk)
+        return str_to_bytes("").join(chunks)
+    def read_fmt(self, fmt):
+        data = self.read(struct.calcsize(fmt))
+        return struct.unpack(fmt, data)[0]
+    def read_int(self):
+        return self.read_fmt("I")
+    def read_long(self):
+        return self.read_fmt("Q")
+    def read_string(self):
+        length = self.read_int()
+        return bytes_to_str(self.read(length))
+
+    def write(self, data):
+        self.connection.sendall(data)
+    def write_fmt(self, fmt, value):
+        data = struct.pack(fmt, value)
+        self.write(data)
+    def write_int(self, value):
+        self.write_fmt("I", value)
+    def write_long(self, value):
+        self.write_fmt("Q", value)
+    def write_string(self, value):
+        value = str_to_bytes(value)
+        self.write_int(len(value))
+        self.write(value)
+
+
+
+if __name__ == "__main__":
+    import optparse
+    parser = optparse.OptionParser(version=__version__)
+    (options, args) = parser.parse_args()
+
+
