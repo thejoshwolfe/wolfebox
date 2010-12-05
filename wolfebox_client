@@ -88,7 +88,7 @@ def main():
             for (path, name) in dirs:
                 check_dir(path, name)
             time.sleep(settings["CHECK_INTERVAL"])
-    except KeyboardInterrupt:
+    except (): #KeyboardInterrupt:
         print("")
 
 def parse_index(index_contents):
@@ -107,6 +107,13 @@ def get_local_index(name):
     except IOError:
         index_contents = ""
     return parse_index(index_contents)
+    write_local_index(local_index)
+def write_local_index(name, local_index):
+    index_path = os.path.join(settings_dir, name + ".index")
+    with open(index_path, "w") as index_file:
+        for line in sorted(entry.serialize() for entry in local_index.values()):
+            index_file.write(line)
+            index_file.write("\n")
 
 def list_recursive(root_path):
     """always uses forward slashes"""
@@ -122,8 +129,15 @@ def get_modified_time(root_path, relative_path):
     """throws OSError sometimes"""
     return os.path.getmtime(root_path + "/" + relative_path)
 def get_md5sum(root_path, relative_path):
+    """throws IOError sometimes"""
     with open(root_path + "/" + relative_path, "rb") as file_handle:
-        return hashlib.md5(file_handle.read()).hexdigest()
+        md5erator = hashlib.md5()
+        while True:
+            chunk = file_handle.read(128)
+            if len(chunk) == 0:
+                break
+            md5erator.update(chunk)
+    return md5erator.hexdigest()
 def entry_for_path(root_path, relative_path):
     try:
         modified_time = get_modified_time(root_path, relative_path)
@@ -145,6 +159,7 @@ def update_local_index(local_index, root_path):
             except KeyError:
                 # new file
                 local_index[existing_path] = entry_for_path(root_path, existing_path)
+                debug("add " + existing_path)
                 continue
             # updated or normal
             modified_time = get_modified_time(root_path, existing_path)
@@ -152,6 +167,7 @@ def update_local_index(local_index, root_path):
                 continue # assume unchanged
             # timestamp is different. make sure md5sum is up to date.
             entry.md5sum = get_md5sum(root_path, existing_path)
+            debug("update " + existing_path)
         except (IOError, OSError):
             # race conditions! deleted while we were md5sum'ing a previous neighbor
             local_index[existing_path] = entry_for_path(root_path, existing_path)
@@ -161,61 +177,71 @@ def update_local_index(local_index, root_path):
 def check_dir(root_path, name):
     local_index = get_local_index(name)
     update_local_index(local_index, root_path)
+    write_local_index(name, local_index)
 
-    return
     remote_index = get_remote_index(name)
-    # TODO
+    if remote_index == None:
+        return
 
 
+def get_remote_index(name):
+    connection = open_connection()
+    if connection == None:
+        return None
 def open_connection():
     server_tuple = (settings["SERVER_NAME"], settings["SERVER_PORT"])
     actual_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         actual_connection.connect(server_tuple)
     except socket.gaierror:
-        sys.exit("ERROR: Can't connect to the wolfebox server at " + server_tuple)
-    return Connection(actual_connection)
-class Connection:
-    def __init__(self, actual_connection):
-        self.connection = actual_connection
-    def __del__(self):
-        self.connection.close()
-    def read(self, length):
-        chunks = []
-        while length != 0:
-            chunk = self.connection.recv(length)
-            if len(chunk) == 0:
-                break
-            chunks.append(chunk)
-            length -= len(chunk)
-        return str_to_bytes("").join(chunks)
-    def read_fmt(self, fmt):
-        data = self.read(struct.calcsize(fmt))
-        return struct.unpack(fmt, data)[0]
-    def read_int(self):
-        return self.read_fmt("I")
-    def read_long(self):
-        return self.read_fmt("Q")
-    def read_string(self):
-        length = self.read_int()
-        return bytes_to_str(self.read(length))
+        debug("ERROR: Can't connect to the wolfebox server at " + repr(server_tuple))
+        return None
+    class Connection:
+        def __init__(self, actual_connection):
+            self.connection = actual_connection
+        def __del__(self):
+            self.connection.close()
+        def read(self, length):
+            chunks = []
+            while length != 0:
+                chunk = self.connection.recv(length)
+                if len(chunk) == 0:
+                    break
+                chunks.append(chunk)
+                length -= len(chunk)
+            return str_to_bytes("").join(chunks)
+        def read_fmt(self, fmt):
+            data = self.read(struct.calcsize(fmt))
+            return struct.unpack(fmt, data)[0]
+        def read_int(self):
+            return self.read_fmt("I")
+        def read_long(self):
+            return self.read_fmt("Q")
+        def read_string(self):
+            length = self.read_int()
+            return bytes_to_str(self.read(length))
 
-    def write(self, data):
-        self.connection.sendall(data)
-    def write_fmt(self, fmt, value):
-        data = struct.pack(fmt, value)
-        self.write(data)
-    def write_int(self, value):
-        self.write_fmt("I", value)
-    def write_long(self, value):
-        self.write_fmt("Q", value)
-    def write_string(self, value):
-        value = str_to_bytes(value)
-        self.write_int(len(value))
-        self.write(value)
+        def write(self, data):
+            self.connection.sendall(data)
+        def write_fmt(self, fmt, value):
+            data = struct.pack(fmt, value)
+            self.write(data)
+        def write_int(self, value):
+            self.write_fmt("I", value)
+        def write_long(self, value):
+            self.write_fmt("Q", value)
+        def write_string(self, value):
+            value = str_to_bytes(value)
+            self.write_int(len(value))
+            self.write(value)
+    return Connection(actual_connection)
 
 
 verbose = False
+def debug(message):
+    if not verbose:
+        return
+    print(message)
 if __name__ == "__main__":
     import optparse
     parser = optparse.OptionParser(version=__version__)
