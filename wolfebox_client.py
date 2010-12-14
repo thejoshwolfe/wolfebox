@@ -6,6 +6,7 @@ import socket
 import hashlib
 
 from settings import read_settings
+from connection import Connection
 
 __version__ = "0.0"
 
@@ -168,58 +169,26 @@ def get_remote_index(name):
     connection = open_connection()
     if connection == None:
         return None
+    connection.write(b"l")
+    connection.write_string(name)
+    error_message = connection.check()
+    if error_message != None:
+        debug("ERROR: " + error_message)
+        return None
+    remote_index = connection.read_string()
+    return remote_index
 def open_connection():
     server_tuple = (settings["SERVER_NAME"], settings["SERVER_PORT"])
     actual_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    bytes_to_str = lambda s: str(s, "utf8")
-    str_to_bytes = lambda s: bytes(s, "utf8")
     try:
         actual_connection.connect(server_tuple)
-    except socket.gaierror:
+    except socket.error:
         debug("ERROR: Can't connect to the wolfebox server at " + repr(server_tuple))
         return None
-    class Connection:
-        def __init__(self, actual_connection):
-            self.connection = actual_connection
-        def __del__(self):
-            self.connection.close()
-        def read(self, length):
-            chunks = []
-            while length != 0:
-                chunk = self.connection.recv(length)
-                if len(chunk) == 0:
-                    break
-                chunks.append(chunk)
-                length -= len(chunk)
-            return str_to_bytes("").join(chunks)
-        def read_fmt(self, fmt):
-            data = self.read(struct.calcsize(fmt))
-            return struct.unpack(fmt, data)[0]
-        def read_int(self):
-            return self.read_fmt("I")
-        def read_long(self):
-            return self.read_fmt("Q")
-        def read_string(self):
-            length = self.read_int()
-            return bytes_to_str(self.read(length))
-
-        def write(self, data):
-            self.connection.sendall(data)
-        def write_fmt(self, fmt, value):
-            data = struct.pack(fmt, value)
-            self.write(data)
-        def write_int(self, value):
-            self.write_fmt("I", value)
-        def write_long(self, value):
-            self.write_fmt("Q", value)
-        def write_string(self, value):
-            value = str_to_bytes(value)
-            self.write_int(len(value))
-            self.write(value)
     return Connection(actual_connection)
 
 
-verbose = False
+verbose = True
 def debug(message):
     if not verbose:
         return
