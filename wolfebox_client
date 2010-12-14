@@ -168,14 +168,15 @@ def get_remote_index(name):
     connection = open_connection()
     if connection == None:
         return None
+    connection.write(b"l")
+    connection.write_string(name)
+    connection.check()
 def open_connection():
     server_tuple = (settings["SERVER_NAME"], settings["SERVER_PORT"])
     actual_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    bytes_to_str = lambda s: str(s, "utf8")
-    str_to_bytes = lambda s: bytes(s, "utf8")
     try:
         actual_connection.connect(server_tuple)
-    except socket.gaierror:
+    except socket.error:
         debug("ERROR: Can't connect to the wolfebox server at " + repr(server_tuple))
         return None
     class Connection:
@@ -191,7 +192,7 @@ def open_connection():
                     break
                 chunks.append(chunk)
                 length -= len(chunk)
-            return str_to_bytes("").join(chunks)
+            return b"".join(chunks)
         def read_fmt(self, fmt):
             data = self.read(struct.calcsize(fmt))
             return struct.unpack(fmt, data)[0]
@@ -201,7 +202,7 @@ def open_connection():
             return self.read_fmt("Q")
         def read_string(self):
             length = self.read_int()
-            return bytes_to_str(self.read(length))
+            return str(self.read(length), "utf8")
 
         def write(self, data):
             self.connection.sendall(data)
@@ -213,13 +214,22 @@ def open_connection():
         def write_long(self, value):
             self.write_fmt("Q", value)
         def write_string(self, value):
-            value = str_to_bytes(value)
+            value = bytes(value, "utf8")
             self.write_int(len(value))
             self.write(value)
+        def check(self):
+            status_code = self.read(1)
+            if status_code == b"w":
+                return None
+            elif status_code == b"b":
+                return self.read_string()
+            else:
+                return "fatal: corrupt network communication " + repr(status_code + self.read(0x10))
+
     return Connection(actual_connection)
 
 
-verbose = False
+verbose = True
 def debug(message):
     if not verbose:
         return
