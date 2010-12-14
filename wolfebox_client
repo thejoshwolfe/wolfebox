@@ -4,13 +4,8 @@ import sys, os
 import time, struct
 import socket
 import hashlib
-python_version = sys.version_info[0]
-if python_version == 2:
-    bytes_to_str = lambda s: s
-    str_to_bytes = lambda s: s
-elif python_version == 3:
-    bytes_to_str = lambda s: str(s, "utf8")
-    str_to_bytes = lambda s: bytes(s, "utf8")
+
+from settings import read_settings
 
 __version__ = "0.0"
 
@@ -33,26 +28,9 @@ default_settings_str = """{
     ],
 }
 """
-settings_dir = os.path.join(os.path.expanduser("~"), ".config", "wolfebox")
-if not os.path.isdir(settings_dir):
-    # let any exceptions bubble
-    os.makedirs(settings_dir)
-settings_path = os.path.join(settings_dir, "config.py")
-# try to read settings
-try:
-    # eval chokes on CRLF sometimes, so use 'U'
-    with open(settings_path, "rU") as settings_file:
-        settings = eval(settings_file.read())
-    if type(settings) != dict:
-        raise TypeError()
-except:
-    # swallow all exceptions from mysterious user code and use default settings
-    # TODO: this is bad
-    with open(settings_path, "w") as settings_file:
-        settings_file.write(default_settings_str)
-    settings = eval(default_settings_str)
+(settings_dir, settings_path, settings) = read_settings("wolfebox", default_settings_str)
 if settings["SERVER_NAME"] == "":
-    sys.exit("ERROR: wolfebox server not configured.\nedit " + settings_path)
+    sys.exit("ERROR: wolfebox is not configured properly. SERVER_NAME is blank.\nedit " + settings_path)
 dirs = []
 for maybe_tuple in settings["DIRS"]:
     if type(maybe_tuple) == tuple:
@@ -99,8 +77,10 @@ def parse_index(index_contents):
     entry_list = [parse_index_entry(line) for line in index_contents.split("\n") if line != ""]
     return {entry.path: entry for entry in entry_list}
 
+def get_index_path(name):
+    return os.path.join(settings_dir, name + ".index")
 def get_local_index(name):
-    index_path = os.path.join(settings_dir, name + ".index")
+    index_path = get_index_path(name)
     try:
         with open(index_path) as index_file:
             index_contents = index_file.read()
@@ -109,7 +89,7 @@ def get_local_index(name):
     return parse_index(index_contents)
     write_local_index(local_index)
 def write_local_index(name, local_index):
-    index_path = os.path.join(settings_dir, name + ".index")
+    index_path = get_index_path(name)
     with open(index_path, "w") as index_file:
         for line in sorted(entry.serialize() for entry in local_index.values()):
             index_file.write(line)
@@ -191,6 +171,8 @@ def get_remote_index(name):
 def open_connection():
     server_tuple = (settings["SERVER_NAME"], settings["SERVER_PORT"])
     actual_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    bytes_to_str = lambda s: str(s, "utf8")
+    str_to_bytes = lambda s: bytes(s, "utf8")
     try:
         actual_connection.connect(server_tuple)
     except socket.gaierror:
