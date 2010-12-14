@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import sys, os
 import time, struct
@@ -78,7 +78,7 @@ class IndexEntry:
     def serialize(self):
         return " ".join([
             self.md5sum,
-            ":".join(self.modified_time),
+            ":".join(str(x) for x in self.modified_time),
             self.path,
         ])
 
@@ -94,7 +94,7 @@ def main():
 def parse_index(index_contents):
     def parse_index_entry(line):
         (md5sum, modified_time_str, path) = line.split(" ", 2)
-        modified_time = time.mktime(tuple(int(x) for x in modified_time_str.split(":")))
+        modified_time = time.struct_time(tuple(int(x) for x in modified_time_str.split(":")))
         return IndexEntry(path, md5sum, modified_time)
     entry_list = [parse_index_entry(line) for line in index_contents.split("\n") if line != ""]
     return {entry.path: entry for entry in entry_list}
@@ -127,7 +127,7 @@ def list_recursive(root_path):
 
 def get_modified_time(root_path, relative_path):
     """throws OSError sometimes"""
-    return os.path.getmtime(root_path + "/" + relative_path)
+    return time.gmtime(os.path.getmtime(root_path + "/" + relative_path))
 def get_md5sum(root_path, relative_path):
     """throws IOError sometimes"""
     with open(root_path + "/" + relative_path, "rb") as file_handle:
