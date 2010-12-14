@@ -23,7 +23,7 @@ if settings["SERVER_NAME"] == "":
     sys.exit("ERROR: wolfebox is not configured properly. SERVER_NAME is blank.\nedit " + settings_path)
 files_dir = os.path.join(settings["DATA_ROOT"], "files")
 if not os.path.isdir(files_dir):
-    os.mkdir(files_dir)
+    os.makedirs(files_dir)
 
 def get_index_path(name):
     return os.path.join(settings_dir, name + ".index")
@@ -48,11 +48,15 @@ def get_lock(name):
 
 def list(connection):
     name = connection.read_string()
+    if name.find("/") != -1 or name.find("\x00") != -1:
+        connection.write(b"b")
+        connection.write_string("bad name")
+        return
     connection.ok()
     index_path = get_index_path(name)
     with get_lock(name):
         contents = read_file_or_blank(index_path)
-    connection.write(contents)
+    connection.write_string(contents)
 
 def server_forever():
     class ConnectionHandler(socketserver.BaseRequestHandler):
@@ -63,7 +67,8 @@ def server_forever():
                 list(connection)
             else:
                 sys.stderr.write("bad command: " + repr(command) + "\n")
-                connection.write("you suck")
+                connection.write(b"b")
+                connection.write_string("you suck")
     class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         pass
     server = ThreadedTCPServer((settings["SERVER_NAME"], settings["SERVER_PORT"]), ConnectionHandler)
